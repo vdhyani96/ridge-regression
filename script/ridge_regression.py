@@ -14,14 +14,15 @@ from math import sqrt
 import os
 import matplotlib.pyplot as plt
 
-def ridgeReg(X, y, lamda):
+
+# function to perform ridge regression
+def perform_ridgeReg(X, y, lamda):
     one = [[1 for i in range(X.shape[1])]]
     X = np.append(X, one, axis = 0)
     Xt = np.transpose(X)
     I = np.identity(X.shape[0] - 1)
-    I = np.identity(X.shape[0])
     zeros = np.zeros((X.shape[0] - 1, 1))
-    I = np.append(I, [zeros], axis = 1)
+    I = np.append(I, zeros, axis = 1)
     # another list of zeros
     zeros = [[0 for i in range(I.shape[1])]]
     I = np.append(I, zeros, axis = 0)
@@ -32,47 +33,58 @@ def ridgeReg(X, y, lamda):
     d = np.matmul(X, y)
     
     w = np.matmul(Cinv, d)
-    # getting bias term from the weights
+    
+    # pulling out the bias parameter
     bias = w[-1]
-    w = w[:-1]
+    wt = w[:-1]
     
     # now calculating the objective function
     wtsqr = w*w
     obj1 = lamda * np.sum(wtsqr)
-    wtrp = np.transpose(w)
+    wtrp = np.transpose(wt)
     X = X[:-1, :]
     term1 = np.matmul(wtrp, X)
     term2 = term1 + bias
     term3 = term2 - y
     obj2 = np.sum(term3 * term3)
     obj = obj1 + obj2
-    list = [w, bias, obj]
+    list = [w, bias, obj, Cinv]
     return list
     
     
 
 # a function to perform the LOOCV
-def loocv(X, y, lamda):
-    sum_squared_error = 0
-    list = ridgeReg(X, y, lamda)
-    for i in range(X.shape[1]):
+def ridgeReg(X, y, lamda):
+    loocv_error = []
+    params = perform_ridgeReg(X, y, lamda)
+    w = params[0]
+    bias = params[1]
+    Cinv = params[3]
+    ones = [[1 for i in range(X.shape[1])]]
+    X = np.append(X, ones, axis = 0)
+    for i in range(200):
         xi = X[:, i]
         yi = y[i]
-        #X = np.delete(X, i, 1)
-        #y = np.delete(y, i, 0)
-        #params = ridgeReg(X, y, lamda)
-        w = list[0]
-        wtrp = np.transpose(w)
-        predicted = np.matmul(wtrp, xi)
-        predicted = predicted[0]
-        error = predicted - yi
-        esquared = error * error
-        sum_squared_error = sum_squared_error + esquared
-    
-    list.append(sum_squared_error)
+        expn1 = np.matmul(w.T, xi) - yi
+        expn2 = np.matmul(xi.T, Cinv)
+        expn3 = 1 - np.matmul(expn2, xi)
+        error = expn1/expn3
+        loocv_error.append(error[0])
+        
+    w = w[:-1]
+    list = [w, bias, params[2], loocv_error]
     return list
 
 
+# a function to compute RMSE values
+def calc_rmse(pred, actual):
+    error = pred - actual
+    sqr_error = error * error
+    mean_sqr_error = np.sum(sqr_error)/pred.shape[0]
+    return sqrt(mean_sqr_error)
+
+#params = ridgeReg(np_train_dat, np_train_label, 0.01)
+# Reading the data
 os.chdir('C:\\Users\\admin\\Desktop\\PostG\\GRE\\Second Take\\Applications\\Univs\\Stony Brook\\Fall 19 Courses\\ML\\Homeworks\\Homework 2\\Kaggle\\Data')
 train_data = pd.read_csv('trainData.csv', header = None)
 train_data = train_data.iloc[:, 1:]
@@ -96,29 +108,39 @@ val_label = val_label.iloc[:, 1:]
 np_val_label = val_label.values
 
 
-# Modeling the training data now
-#params = loocv(np_train_dat, np_train_label, 1)
-datum = np_train_dat.T
-thresholder = VarianceThreshold(threshold = 0.0001)
-ab = thresholder.fit_transform(datum)
-ab = np.log(ab + 1)
-np_train_dat = ab.T
-params = ridgeReg(np_train_dat, np_train_label, 0.01)
-wt = params
-prediction = np.matmul(np.transpose(np_train_dat), wt)
-rms = sqrt(mean_squared_error(np_train_label, prediction))
-
+# Modeling the training data now for different lamda
+rmse_train = []
+rmse_val = []
+rmse_loocv = []
+for lamda in [0.01, 0.1, 1, 10, 100, 1000]:
+    params = ridgeReg(np_train_dat, np_train_label, lamda)
+    wt = params[0]
+    pred_train = np.matmul(np.transpose(np_train_dat), wt)
+    pred_train = pred_train + params[1]     # adding bias term
+    rmse = calc_rmse(pred_train, np_train_label)
+    rmse_train.append(rmse)
+    pred_val = np.matmul(np.transpose(np_val_dat), wt)
+    pred_val = pred_val + params[1]
+    rmse = calc_rmse(pred_val, np_val_label)
+    rmse_val.append(rmse)
+    # now taking rmse for loocv
+    loocv = params[3]
+    loocv2 = np.array(loocv) * np.array(loocv)
+    loocv_mean = np.sum(loocv2)/len(loocv)
+    rmse = sqrt(loocv_mean)
+    rmse_loocv.append(rmse)
+    
 
 
 # Modeling the training + validation data
 train = np.append(np_train_dat, np_val_dat, axis = 1)
-train = np.append(train, np_test_dat.T, axis = 1)
+#train = np.append(train, np_test_dat.T, axis = 1)
 target = np.append(np_train_label, np_val_label, axis = 0)
 
 
 # removing low variance
 traint = train.T
-thresholder = VarianceThreshold(threshold = 0.0003)
+thresholder = VarianceThreshold(threshold = 0.00005)
 ab = thresholder.fit_transform(traint)
 train = ab[:10000, :].T
 np_test_dat = ab[10000:, :]
@@ -128,14 +150,14 @@ params = ridgeReg(train, target, 0.01)
 
 
 # plotting correlation plot
-dataframe = np.append(train.T, target, axis = 1)
-dataframe = pd.DataFrame(data = dataframe)
-subset = dataframe.iloc[:, 1:20]
-subset.insert(19, '20', value = dataframe.iloc[:, -1])
-corr = subset.corr()
-corr.style.background_gradient(cmap = 'coolwarm')
-plt.matshow(subset.corr())
-plt.show()
+#dataframe = np.append(train.T, target, axis = 1)
+#dataframe = pd.DataFrame(data = dataframe)
+#subset = dataframe.iloc[:, 1:20]
+#subset.insert(19, '20', value = dataframe.iloc[:, -1])
+#corr = subset.corr()
+#corr.style.background_gradient(cmap = 'coolwarm')
+#plt.matshow(subset.corr())
+#plt.show()
 
 
 
@@ -149,8 +171,11 @@ plt.show()
 test_data = pd.read_csv('testData_new.csv', header = None)
 test_data = test_data.iloc[:, 1:]
 np_test_dat = test_data.values
-wt = params
+wt = params[0]
+bias = params[1]
 prediction = np.matmul(np_test_dat, wt)
+# adding bias to the values
+prediction = prediction + bias
 
 prediction[prediction < 80] = 80
 prediction[prediction > 100] = 100
